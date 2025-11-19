@@ -12,6 +12,10 @@ function normalizedBounds(a: Coord, b: Coord) {
   return { r1, r2, c1, c2 };
 }
 
+function clamp(n: number, a: number, b: number) {
+  return Math.max(a, Math.min(b, n));
+}
+
 export default function DataGrid() {
   const [rows, setRows] = useState<number>(5);
   const [cols, setCols] = useState<number>(5);
@@ -24,6 +28,52 @@ export default function DataGrid() {
   const [colHeaders, setColHeaders] = useState<string[]>(() =>
     Array.from({ length: 5 }, (_, i) => `C${i + 1}`)
   );
+  // load persisted grid if available
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("animaker-datagrid:v1");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed?.data && Array.isArray(parsed.data)) {
+        // defer state updates slightly to avoid sync setState-in-effect warnings
+        setTimeout(() => {
+          setData(parsed.data);
+          setRows(parsed.rows ?? parsed.data.length ?? 5);
+          setCols(parsed.cols ?? parsed.data[0]?.length ?? 5);
+          setRowLabels(
+            parsed.rowLabels ??
+              Array.from(
+                { length: parsed.rows ?? parsed.data.length },
+                (_, i) => `R${i + 1}`
+              )
+          );
+          setColHeaders(
+            parsed.colHeaders ??
+              Array.from(
+                { length: parsed.cols ?? parsed.data[0]?.length ?? 5 },
+                (_, i) => `C${i + 1}`
+              )
+          );
+        }, 0);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // persist on changes
+  useEffect(() => {
+    try {
+      const payload = { rows, cols, data, rowLabels, colHeaders };
+      localStorage.setItem("animaker-datagrid:v1", JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+  }, [rows, cols, data, rowLabels, colHeaders]);
+  const pointerIsDownRef = useRef(false);
+  const pointerMovedRef = useRef(false);
+  const pointerDownCellRef = useRef<Coord | null>(null);
+  const [focused, setFocused] = useState<Coord | null>(null);
 
   const [selectStart, setSelectStart] = useState<Coord | null>(null);
   const [selectEnd, setSelectEnd] = useState<Coord | null>(null);
@@ -37,33 +87,113 @@ export default function DataGrid() {
   useEffect(() => {
     function onPointerUp() {
       selectingRef.current = false;
+      pointerIsDownRef.current = false;
+      pointerMovedRef.current = false;
+      pointerDownCellRef.current = null;
     }
     window.addEventListener("pointerup", onPointerUp);
     return () => window.removeEventListener("pointerup", onPointerUp);
   }, []);
 
+  // keyboard handlers: copy/cut, navigation, Enter/Tab to edit
   useEffect(() => {
+    function writeSelectionToClipboard(cut = false) {
+      const sel =
+        selectStart && selectEnd
+          ? normalizedBounds(selectStart, selectEnd)
+          : focused
+          ? { r1: focused.r, r2: focused.r, c1: focused.c, c2: focused.c }
+          : null;
+      if (!sel) return;
+      const { r1, r2, c1, c2 } = sel;
+      const lines: string[] = [];
+      for (let r = r1; r <= r2; r++) {
+        const row: string[] = [];
+        for (let c = c1; c <= c2; c++) row.push(data[r][c] ?? "");
+        lines.push(row.join("\t"));
+      }
+      const text = lines.join("\n");
+      navigator.clipboard
+        ?.writeText(text)
+        .then(() => {
+          if (cut) {
+            setData((prev) => {
+              const next = prev.map((r) => r.slice());
+              for (let r = r1; r <= r2; r++)
+                for (let c = c1; c <= c2; c++) next[r][c] = "";
+              return next;
+            });
+          }
+        })
+        .catch(() => {});
+    }
+
     function onKey(e: KeyboardEvent) {
       const meta = e.ctrlKey || e.metaKey;
-      if (!meta) return;
-      if (e.key.toLowerCase() === "c") {
-        if (selectStart && selectEnd) {
+      // copy/cut - only intercept when NOT editing (allow input to handle copy/cut while editing)
+      if (
+        meta &&
+        (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "x")
+      ) {
+        if (!editing) {
           e.preventDefault();
-          const { r1, r2, c1, c2 } = normalizedBounds(selectStart, selectEnd);
-          const lines: string[] = [];
-          for (let r = r1; r <= r2; r++) {
-            const row: string[] = [];
-            for (let c = c1; c <= c2; c++) row.push(data[r][c] ?? "");
-            lines.push(row.join("\t"));
+          writeSelectionToClipboard(e.key.toLowerCase() === "x");
+        }
+        return;
+      }
+
+      // navigation when not editing
+      if (!editing) {
+        if (
+          ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)
+        ) {
+          e.preventDefault();
+          const cur = focused ?? selectStart ?? { r: 0, c: 0 };
+          let nr = cur.r;
+          let nc = cur.c;
+          if (e.key === "ArrowLeft") nc = clamp(nc - 1, 0, cols - 1);
+          if (e.key === "ArrowRight") nc = clamp(nc + 1, 0, cols - 1);
+          if (e.key === "ArrowUp") nr = clamp(nr - 1, 0, rows - 1);
+          if (e.key === "ArrowDown") nr = clamp(nr + 1, 0, rows - 1);
+          setSelectStart({ r: nr, c: nc });
+          setSelectEnd({ r: nr, c: nc });
+          setFocused({ r: nr, c: nc });
+          return;
+        }
+
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const cur = focused ?? selectStart ?? { r: 0, c: 0 };
+          setEditing(cur);
+          setEditingValue(data[cur.r][cur.c] ?? "");
+          return;
+        }
+
+        if (e.key === "Tab") {
+          e.preventDefault();
+          const cur = focused ?? selectStart ?? { r: 0, c: 0 };
+          let nr = cur.r;
+          let nc = cur.c + (e.shiftKey ? -1 : 1);
+          if (nc >= cols) {
+            nc = 0;
+            nr = clamp(nr + 1, 0, rows - 1);
           }
-          const text = lines.join("\n");
-          navigator.clipboard?.writeText(text).catch(() => {});
+          if (nc < 0) {
+            nc = cols - 1;
+            nr = clamp(nr - 1, 0, rows - 1);
+          }
+          setSelectStart({ r: nr, c: nc });
+          setSelectEnd({ r: nr, c: nc });
+          setFocused({ r: nr, c: nc });
+          return;
         }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [data, selectStart, selectEnd]);
+  }, [data, selectStart, selectEnd, focused, editing, rows, cols]);
+
+  // (keyboard handlers are added later)
 
   function startSelection(r: number, c: number) {
     setSelectStart({ r, c });
@@ -102,12 +232,13 @@ export default function DataGrid() {
   }
 
   function addCol() {
-    setCols((n) => {
-      const next = n + 1;
-      setData((prev) => prev.map((row) => [...row, ""]));
-      setColHeaders((prev) => [...prev, `C${next}`]);
-      return next;
+    setData((prev) => {
+      return prev.map((row) => [...row, ""]); // add new empty cell
     });
+
+    setColHeaders((prev) => [...prev, `C${prev.length + 1}`]);
+
+    setCols((prev) => prev + 1);
   }
 
   function onCellDoubleClick(r: number, c: number) {
@@ -118,35 +249,58 @@ export default function DataGrid() {
   function commitEdit() {
     if (editing) {
       setCell(editing.r, editing.c, editingValue);
-      setEditing(null);
+      const cur = editing;
+      setTimeout(() => {
+        setEditing(null);
+        setFocused(cur);
+      }, 0);
     }
   }
 
   function handlePaste(e: React.ClipboardEvent) {
+    // if a cell input is in edit mode, allow the browser to paste into it instead
+    if (editing) return;
     const text = e.clipboardData.getData("text/plain");
     if (!text) return;
     e.preventDefault();
 
-    const rowsText = text.split(/\r?\n/).filter((r) => r.length > 0);
-    const parsed = rowsText.map((r) => r.split("\t"));
+    // If a single cell is selected and the paste is plain text (not TSV), enter edit mode and paste into that cell
+    const singleCell =
+      selectStart &&
+      selectEnd &&
+      selectStart.r === selectEnd.r &&
+      selectStart.c === selectEnd.c;
+    const isTSV = text.includes("\t") || text.includes("\n");
 
-    const start = selectStart ?? { r: 0, c: 0 };
-    const pasteR = parsed.length;
-    const pasteC = parsed[0]?.length ?? 0;
-
-    const needRows = Math.max(0, start.r + pasteR - rows);
-    const needCols = Math.max(0, start.c + pasteC - cols);
-    if (needRows > 0) setRows((n) => n + needRows);
-    if (needCols > 0) setCols((n) => n + needCols);
-
-    setTimeout(() => {
+    // If single cell selected and clipboard is a TSV block (multi-cell), paste as grid
+    if (singleCell && isTSV) {
+      const rowsText = text.split(/\r?\n/).filter((r) => r.length > 0);
+      const parsed = rowsText.map((r) => r.split("\t"));
+      const start = selectStart;
+      const pasteR = parsed.length;
+      const pasteC = parsed[0]?.length ?? 0;
+      const newRows = Math.max(rows, start.r + pasteR);
+      const newCols = Math.max(cols, start.c + pasteC);
+      if (newRows !== rows) setRows(newRows);
+      if (newCols !== cols) setCols(newCols);
+      if (newRows !== rows)
+        setRowLabels((prev) => {
+          const out = prev.slice();
+          while (out.length < newRows) out.push(`R${out.length + 1}`);
+          return out;
+        });
+      if (newCols !== cols)
+        setColHeaders((prev) => {
+          const out = prev.slice();
+          while (out.length < newCols) out.push(`C${out.length + 1}`);
+          return out;
+        });
       setData((prev) => {
-        const next = Array.from(
-          { length: Math.max(rows, start.r + pasteR) },
-          (_, r) =>
-            Array.from({ length: Math.max(cols, start.c + pasteC) }, (_, c) =>
-              prev[r] && prev[r][c] ? prev[r][c] : ""
-            )
+        const next = Array.from({ length: newRows }, (_, r) =>
+          Array.from(
+            { length: newCols },
+            (_, c) => (prev[r] && prev[r][c]) || ""
+          )
         );
         for (let r = 0; r < pasteR; r++) {
           for (let c = 0; c < pasteC; c++) {
@@ -157,7 +311,56 @@ export default function DataGrid() {
         }
         return next;
       });
-    }, 0);
+      return;
+    }
+
+    // If single cell selected and clipboard is plain text, enter edit mode and paste into that cell
+    if (singleCell && !isTSV) {
+      setEditing(selectStart);
+      setEditingValue(text);
+      setCell(selectStart.r, selectStart.c, text);
+      setFocused(selectStart);
+      return;
+    }
+
+    // Otherwise, treat as TSV paste (multi-cell selection)
+    const rowsText = text.split(/\r?\n/).filter((r) => r.length > 0);
+    const parsed = rowsText.map((r) => r.split("\t"));
+
+    const start = selectStart ?? focused ?? { r: 0, c: 0 };
+    const pasteR = parsed.length;
+    const pasteC = parsed[0]?.length ?? 0;
+
+    const newRows = Math.max(rows, start.r + pasteR);
+    const newCols = Math.max(cols, start.c + pasteC);
+    if (newRows !== rows) setRows(newRows);
+    if (newCols !== cols) setCols(newCols);
+    if (newRows !== rows)
+      setRowLabels((prev) => {
+        const out = prev.slice();
+        while (out.length < newRows) out.push(`R${out.length + 1}`);
+        return out;
+      });
+    if (newCols !== cols)
+      setColHeaders((prev) => {
+        const out = prev.slice();
+        while (out.length < newCols) out.push(`C${out.length + 1}`);
+        return out;
+      });
+
+    setData((prev) => {
+      const next = Array.from({ length: newRows }, (_, r) =>
+        Array.from({ length: newCols }, (_, c) => (prev[r] && prev[r][c]) || "")
+      );
+      for (let r = 0; r < pasteR; r++) {
+        for (let c = 0; c < pasteC; c++) {
+          const rr = start.r + r;
+          const cc = start.c + c;
+          next[rr][cc] = parsed[r][c] ?? "";
+        }
+      }
+      return next;
+    });
   }
 
   const {
@@ -211,16 +414,58 @@ export default function DataGrid() {
                       className={`cell ${isSelected ? "selected" : ""}`}
                       onPointerDown={(ev) => {
                         ev.preventDefault();
-                        startSelection(r, c);
-                      }}
-                      onPointerEnter={() => extendSelection(r, c)}
-                      onPointerUp={() => finishSelection()}
-                      onDoubleClick={() => onCellDoubleClick(r, c)}
-                      onClick={() => {
+                        containerRef.current?.focus(); // <-- paste now works
+                        pointerIsDownRef.current = true;
+                        pointerMovedRef.current = false;
+                        pointerDownCellRef.current = { r, c };
+                        // set focus/selection visually
                         setSelectStart({ r, c });
                         setSelectEnd({ r, c });
-                        setEditing(null);
+                        setFocused({ r, c });
                       }}
+                      onPointerEnter={() => {
+                        if (pointerIsDownRef.current) {
+                          // dragging started
+                          pointerMovedRef.current = true;
+                          if (
+                            !selectingRef.current &&
+                            pointerDownCellRef.current
+                          ) {
+                            startSelection(
+                              pointerDownCellRef.current.r,
+                              pointerDownCellRef.current.c
+                            );
+                          }
+                          extendSelection(r, c);
+                        }
+                      }}
+                      onPointerUp={() => {
+                        if (!pointerMovedRef.current) {
+                          // If editing, commit and switch to new cell
+                          if (editing && (editing.r !== r || editing.c !== c)) {
+                            commitEdit();
+                          }
+                          // single click: if cell has content, enter edit; else just select
+                          if (data[r][c]) {
+                            setSelectStart({ r, c });
+                            setSelectEnd({ r, c });
+                            setFocused({ r, c });
+                            setEditing({ r, c });
+                            setEditingValue(data[r][c]);
+                          } else {
+                            setSelectStart({ r, c });
+                            setSelectEnd({ r, c });
+                            setFocused({ r, c });
+                            setEditing(null);
+                          }
+                        } else {
+                          finishSelection();
+                        }
+                        pointerIsDownRef.current = false;
+                        pointerMovedRef.current = false;
+                        pointerDownCellRef.current = null;
+                      }}
+                      onDoubleClick={() => onCellDoubleClick(r, c)}
                     >
                       {isEditing ? (
                         <input
@@ -230,8 +475,14 @@ export default function DataGrid() {
                           onChange={(e) => setEditingValue(e.target.value)}
                           onBlur={() => commitEdit()}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter") commitEdit();
-                            if (e.key === "Escape") setEditing(null);
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              commitEdit();
+                            }
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              setEditing(null);
+                            }
                           }}
                         />
                       ) : (
