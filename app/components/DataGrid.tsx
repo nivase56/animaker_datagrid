@@ -83,6 +83,8 @@ export default function DataGrid() {
   const [editingValue, setEditingValue] = useState("");
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const measureRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     function onPointerUp() {
@@ -98,18 +100,23 @@ export default function DataGrid() {
   // keyboard handlers: copy/cut, navigation, Enter/Tab to edit
   useEffect(() => {
     function writeSelectionToClipboard(cut = false) {
-      const sel =
-        selectStart && selectEnd
-          ? normalizedBounds(selectStart, selectEnd)
-          : focused
-          ? { r1: focused.r, r2: focused.r, c1: focused.c, c2: focused.c }
-          : null;
+      // prefer the live editing cell when present
+      const sel = editing
+        ? { r1: editing.r, r2: editing.r, c1: editing.c, c2: editing.c }
+        : selectStart && selectEnd
+        ? normalizedBounds(selectStart, selectEnd)
+        : focused
+        ? { r1: focused.r, r2: focused.r, c1: focused.c, c2: focused.c }
+        : null;
       if (!sel) return;
       const { r1, r2, c1, c2 } = sel;
       const lines: string[] = [];
       for (let r = r1; r <= r2; r++) {
         const row: string[] = [];
-        for (let c = c1; c <= c2; c++) row.push(data[r][c] ?? "");
+        for (let c = c1; c <= c2; c++) {
+          if (editing && editing.r === r && editing.c === c) row.push(editingValue ?? "");
+          else row.push((data[r] && data[r][c]) || "");
+        }
         lines.push(row.join("\t"));
       }
       const text = lines.join("\n");
@@ -118,11 +125,15 @@ export default function DataGrid() {
         .then(() => {
           if (cut) {
             setData((prev) => {
-              const next = prev.map((r) => r.slice());
-              for (let r = r1; r <= r2; r++)
-                for (let c = c1; c <= c2; c++) next[r][c] = "";
+              const next = prev.map((row) => row.slice());
+              for (let r = r1; r <= r2; r++) {
+                for (let c = c1; c <= c2; c++) {
+                  next[r][c] = "";
+                }
+              }
               return next;
             });
+            if (editing) setEditing(null);
           }
         })
         .catch(() => {});
@@ -130,23 +141,16 @@ export default function DataGrid() {
 
     function onKey(e: KeyboardEvent) {
       const meta = e.ctrlKey || e.metaKey;
-      // copy/cut - only intercept when NOT editing (allow input to handle copy/cut while editing)
-      if (
-        meta &&
-        (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "x")
-      ) {
-        if (!editing) {
-          e.preventDefault();
-          writeSelectionToClipboard(e.key.toLowerCase() === "x");
-        }
+      // copy/cut - intercept always; when editing, copy the whole cell (editingValue)
+      if (meta && (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "x")) {
+        e.preventDefault();
+        writeSelectionToClipboard(e.key.toLowerCase() === "x");
         return;
       }
 
       // navigation when not editing
       if (!editing) {
-        if (
-          ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)
-        ) {
+        if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
           e.preventDefault();
           const cur = focused ?? selectStart ?? { r: 0, c: 0 };
           let nr = cur.r;
@@ -191,7 +195,30 @@ export default function DataGrid() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [data, selectStart, selectEnd, focused, editing, rows, cols]);
+  }, [data, selectStart, selectEnd, focused, editing, editingValue, rows, cols]);
+
+  // auto-resize the editing input to fit its content (up to the cell width)
+  useEffect(() => {
+    function adjust() {
+      const inp = inputRef.current;
+      const meas = measureRef.current;
+      if (!inp || !meas || !editing) return;
+      // set measurement text
+      meas.textContent = editingValue ?? "";
+      // desired width in px
+      const desired = meas.scrollWidth + 12; // small padding
+      const td = containerRef.current?.querySelector(
+        `td[data-row='${editing.r}'][data-col='${editing.c}']`
+      ) as HTMLElement | null;
+      const max = td ? Math.max(40, td.clientWidth - 8) : 400;
+      const width = Math.min(desired, max);
+      inp.style.width = width + "px";
+    }
+
+    adjust();
+    window.addEventListener("resize", adjust);
+    return () => window.removeEventListener("resize", adjust);
+  }, [editingValue, editing, rows, cols]);
 
   // (keyboard handlers are added later)
 
@@ -410,15 +437,16 @@ export default function DataGrid() {
 
                   return (
                     <td
+                      data-row={r}
+                      data-col={c}
                       key={`c-${r}-${c}`}
                       className={`cell ${isSelected ? "selected" : ""}`}
                       onPointerDown={(ev) => {
                         ev.preventDefault();
-                        containerRef.current?.focus(); // <-- paste now works
+                        containerRef.current?.focus();
                         pointerIsDownRef.current = true;
                         pointerMovedRef.current = false;
                         pointerDownCellRef.current = { r, c };
-                        // set focus/selection visually
                         setSelectStart({ r, c });
                         setSelectEnd({ r, c });
                         setFocused({ r, c });
@@ -468,23 +496,26 @@ export default function DataGrid() {
                       onDoubleClick={() => onCellDoubleClick(r, c)}
                     >
                       {isEditing ? (
-                        <input
-                          autoFocus
-                          className="cell-input"
-                          value={editingValue}
-                          onChange={(e) => setEditingValue(e.target.value)}
-                          onBlur={() => commitEdit()}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              commitEdit();
-                            }
-                            if (e.key === "Escape") {
-                              e.preventDefault();
-                              setEditing(null);
-                            }
-                          }}
-                        />
+                        <>
+                          <input
+                            ref={inputRef}
+                            autoFocus
+                            className="cell-input"
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() => commitEdit()}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                commitEdit();
+                              }
+                              if (e.key === "Escape") {
+                                e.preventDefault();
+                                setEditing(null);
+                              }
+                            }}
+                          />
+                        </>
                       ) : (
                         <div className="cell-display">{data[r][c]}</div>
                       )}
@@ -496,6 +527,22 @@ export default function DataGrid() {
           </tbody>
         </table>
       </div>
+
+      {/* hidden measurement element for auto-sizing the input */}
+      <div
+        ref={measureRef}
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          left: -9999,
+          top: 0,
+          visibility: "hidden",
+          whiteSpace: "pre",
+          fontFamily: "inherit",
+          padding: "4px",
+          boxSizing: "border-box",
+        }}
+      />
 
       {/* BOTTOM LEFT BUTTON */}
       <button className="btn add-row-btn" onClick={addRow}>
