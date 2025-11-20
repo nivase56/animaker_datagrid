@@ -1,3 +1,51 @@
+# Animaker DataGrid
+## Features
+
+- Editable grid cells
+- Add/remove rows and columns
+- Shift-click to select multiple cells
+- Keyboard navigation (arrow keys, Enter, Tab)
+- Copy/paste support
+- Responsive and modern UI
+- Modular component structure
+
+## Getting Started
+
+### Installation
+
+Clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/nivase56/animaker_datagrid.git
+cd animaker_datagrid
+npm install
+```
+
+### Running Locally
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## Project Structure
+
+- `app/components/DataGrid.tsx` — Main grid logic
+- `app/components/DataGridHeader.tsx` — Table header
+- `app/components/DataGridRow.tsx` — Table row
+- `app/components/DataGridCell.tsx` — Table cell
+- `app/components/DataGridControls.tsx` — Add row/column controls
+- `app/components/DataGridService.ts` — Utility functions
+- `app/globals.css` — Global styles
+
+## Contributing
+
+Pull requests and suggestions are welcome! Please follow standard code style and add clear, single-line comments only for high-priority features.
+
+## License
+
+MIT
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
