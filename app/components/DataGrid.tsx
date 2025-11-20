@@ -1,6 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import DataGridHeader from "./DataGridHeader";
+import DataGridRow from "./DataGridRow";
+import DataGridControls from "./DataGridControls";
 
 type Coord = { r: number; c: number };
 
@@ -23,10 +26,10 @@ export default function DataGrid() {
     Array.from({ length: 5 }, () => Array.from({ length: 5 }, () => ""))
   );
   const [rowLabels, setRowLabels] = useState<string[]>(() =>
-    Array.from({ length: 5 }, (_, i) => `R${i + 1}`)
+    Array.from({ length: 5 }, (_, i) => `Label ${i + 1}`)
   );
   const [colHeaders, setColHeaders] = useState<string[]>(() =>
-    Array.from({ length: 5 }, (_, i) => `C${i + 1}`)
+    Array.from({ length: 5 }, (_, i) => `Head ${i + 1}`)
   );
   // load persisted grid if available
   useEffect(() => {
@@ -253,7 +256,7 @@ export default function DataGrid() {
         copy.push(Array.from({ length: cols }, () => ""));
         return copy;
       });
-      setRowLabels((prev) => [...prev, `R${next}`]);
+  setRowLabels((prev) => [...prev, `Label ${prev.length + 1}`]);
       return next;
     });
   }
@@ -263,7 +266,7 @@ export default function DataGrid() {
       return prev.map((row) => [...row, ""]); // add new empty cell
     });
 
-    setColHeaders((prev) => [...prev, `C${prev.length + 1}`]);
+    setColHeaders((prev) => [...prev, `Head ${prev.length + 1}`]);
 
     setCols((prev) => prev + 1);
   }
@@ -313,13 +316,13 @@ export default function DataGrid() {
       if (newRows !== rows)
         setRowLabels((prev) => {
           const out = prev.slice();
-          while (out.length < newRows) out.push(`R${out.length + 1}`);
+          while (out.length < newRows) out.push(`Row ${out.length + 1}`);
           return out;
         });
       if (newCols !== cols)
         setColHeaders((prev) => {
           const out = prev.slice();
-          while (out.length < newCols) out.push(`C${out.length + 1}`);
+          while (out.length < newCols) out.push(`Column ${out.length + 1}`);
           return out;
         });
       setData((prev) => {
@@ -365,13 +368,13 @@ export default function DataGrid() {
     if (newRows !== rows)
       setRowLabels((prev) => {
         const out = prev.slice();
-        while (out.length < newRows) out.push(`R${out.length + 1}`);
+        while (out.length < newRows) out.push(`Label ${out.length + 1}`);
         return out;
       });
     if (newCols !== cols)
       setColHeaders((prev) => {
         const out = prev.slice();
-        while (out.length < newCols) out.push(`C${out.length + 1}`);
+        while (out.length < newCols) out.push(`Head ${out.length + 1}`);
         return out;
       });
 
@@ -400,135 +403,94 @@ export default function DataGrid() {
     : { r1: -1, r2: -2, c1: -1, c2: -2 };
 
   return (
-    <div className="datagrid-wrapper">
-      {/* TOP RIGHT BUTTON */}
-      <div className="w-full flex justify-end">
-        <button className="btn add-col-btn" onClick={addCol}>
-          Add Column
-        </button>
-      </div>
+    <div className="datagrid-wrapper ">
+      <DataGridControls onAddRow={addRow} onAddCol={addCol} />
       <div
-        className="datagrid-container"
+        className="datagrid-container rounded-md"
         tabIndex={0}
         onPaste={handlePaste}
         ref={containerRef}
       >
         <table className="datagrid-table" role="grid">
-          <thead>
-            <tr>
-              <th className="corner" />
-              {colHeaders.map((h, c) => (
-                <th key={`h-${c}`} className="header-cell">
-                  <div className="header-inner">{h}</div>
-                </th>
-              ))}
-            </tr>
-          </thead>
-
+          <DataGridHeader colHeaders={colHeaders} />
           <tbody>
             {Array.from({ length: rows }).map((_, r) => (
-              <tr key={`r-${r}`}>
-                <th className="label-cell">{rowLabels[r]}</th>
-                {Array.from({ length: cols }).map((_, c) => {
-                  const isSelected =
-                    r >= selR1 && r <= selR2 && c >= selC1 && c <= selC2;
-                  const isEditing =
-                    editing && editing.r === r && editing.c === c;
-
-                  return (
-                    <td
-                      data-row={r}
-                      data-col={c}
-                      key={`c-${r}-${c}`}
-                      className={`cell ${isSelected ? "selected" : ""}`}
-                      onPointerDown={(ev) => {
-                        ev.preventDefault();
-                        containerRef.current?.focus();
-                        pointerIsDownRef.current = true;
-                        pointerMovedRef.current = false;
-                        pointerDownCellRef.current = { r, c };
-                        setSelectStart({ r, c });
-                        setSelectEnd({ r, c });
-                        setFocused({ r, c });
-                      }}
-                      onPointerEnter={() => {
-                        if (pointerIsDownRef.current) {
-                          // dragging started
-                          pointerMovedRef.current = true;
-                          if (
-                            !selectingRef.current &&
-                            pointerDownCellRef.current
-                          ) {
-                            startSelection(
-                              pointerDownCellRef.current.r,
-                              pointerDownCellRef.current.c
-                            );
-                          }
-                          extendSelection(r, c);
-                        }
-                      }}
-                      onPointerUp={() => {
-                        if (!pointerMovedRef.current) {
-                          // If editing, commit and switch to new cell
-                          if (editing && (editing.r !== r || editing.c !== c)) {
-                            commitEdit();
-                          }
-                          // single click: if cell has content, enter edit; else just select
-                          if (data[r][c]) {
-                            setSelectStart({ r, c });
-                            setSelectEnd({ r, c });
-                            setFocused({ r, c });
-                            setEditing({ r, c });
-                            setEditingValue(data[r][c]);
-                          } else {
-                            setSelectStart({ r, c });
-                            setSelectEnd({ r, c });
-                            setFocused({ r, c });
-                            setEditing(null);
-                          }
-                        } else {
-                          finishSelection();
-                        }
-                        pointerIsDownRef.current = false;
-                        pointerMovedRef.current = false;
-                        pointerDownCellRef.current = null;
-                      }}
-                      onDoubleClick={() => onCellDoubleClick(r, c)}
-                    >
-                      {isEditing ? (
-                        <>
-                          <input
-                            ref={inputRef}
-                            autoFocus
-                            className="cell-input"
-                            value={editingValue}
-                            onChange={(e) => setEditingValue(e.target.value)}
-                            onBlur={() => commitEdit()}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                commitEdit();
-                              }
-                              if (e.key === "Escape") {
-                                e.preventDefault();
-                                setEditing(null);
-                              }
-                            }}
-                          />
-                        </>
-                      ) : (
-                        <div className="cell-display">{data[r][c]}</div>
-                      )}
-                    </td>
-                  );
+              <DataGridRow
+                key={`r-${r}`}
+                r={r}
+                rowLabel={rowLabels[r]}
+                cols={cols}
+                data={data[r]}
+                selR1={selR1}
+                selR2={selR2}
+                selC1={selC1}
+                selC2={selC2}
+                editing={editing}
+                editingValue={editingValue}
+                inputRef={inputRef}
+                cellProps={(rowIdx, colIdx) => ({
+                  onPointerDown: (ev: React.PointerEvent<HTMLTableCellElement>) => {
+                    ev.preventDefault();
+                    containerRef.current?.focus();
+                    pointerIsDownRef.current = true;
+                    pointerMovedRef.current = false;
+                    pointerDownCellRef.current = { r: rowIdx, c: colIdx };
+                    setSelectStart({ r: rowIdx, c: colIdx });
+                    setSelectEnd({ r: rowIdx, c: colIdx });
+                    setFocused({ r: rowIdx, c: colIdx });
+                  },
+                  onPointerEnter: () => {
+                    if (pointerIsDownRef.current) {
+                      pointerMovedRef.current = true;
+                      if (!selectingRef.current && pointerDownCellRef.current) {
+                        startSelection(pointerDownCellRef.current.r, pointerDownCellRef.current.c);
+                      }
+                      extendSelection(rowIdx, colIdx);
+                    }
+                  },
+                  onPointerUp: () => {
+                    if (!pointerMovedRef.current) {
+                      if (editing && (editing.r !== rowIdx || editing.c !== colIdx)) {
+                        commitEdit();
+                      }
+                      if (data[rowIdx][colIdx]) {
+                        setSelectStart({ r: rowIdx, c: colIdx });
+                        setSelectEnd({ r: rowIdx, c: colIdx });
+                        setFocused({ r: rowIdx, c: colIdx });
+                        setEditing({ r: rowIdx, c: colIdx });
+                        setEditingValue(data[rowIdx][colIdx]);
+                      } else {
+                        setSelectStart({ r: rowIdx, c: colIdx });
+                        setSelectEnd({ r: rowIdx, c: colIdx });
+                        setFocused({ r: rowIdx, c: colIdx });
+                        setEditing(null);
+                      }
+                    } else {
+                      finishSelection();
+                    }
+                    pointerIsDownRef.current = false;
+                    pointerMovedRef.current = false;
+                    pointerDownCellRef.current = null;
+                  },
+                  onDoubleClick: () => onCellDoubleClick(rowIdx, colIdx),
+                  onChange: (e: React.ChangeEvent<HTMLInputElement>) => setEditingValue(e.target.value),
+                  onBlur: () => commitEdit(),
+                  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitEdit();
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setEditing(null);
+                    }
+                  },
                 })}
-              </tr>
+              />
             ))}
           </tbody>
         </table>
       </div>
-
-      {/* hidden measurement element for auto-sizing the input */}
       <div
         ref={measureRef}
         aria-hidden="true"
@@ -543,11 +505,6 @@ export default function DataGrid() {
           boxSizing: "border-box",
         }}
       />
-
-      {/* BOTTOM LEFT BUTTON */}
-      <button className="btn add-row-btn" onClick={addRow}>
-        Add Row
-      </button>
     </div>
   );
 }
