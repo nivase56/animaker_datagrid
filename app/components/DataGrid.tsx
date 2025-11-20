@@ -435,9 +435,15 @@ export default function DataGrid() {
                     pointerIsDownRef.current = true;
                     pointerMovedRef.current = false;
                     pointerDownCellRef.current = { r: rowIdx, c: colIdx };
-                    setSelectStart({ r: rowIdx, c: colIdx });
-                    setSelectEnd({ r: rowIdx, c: colIdx });
-                    setFocused({ r: rowIdx, c: colIdx });
+                    if (ev.shiftKey && focused) {
+                      // Shift-click: extend selection from focused to clicked cell
+                      setSelectStart(focused);
+                      setSelectEnd({ r: rowIdx, c: colIdx });
+                    } else {
+                      setSelectStart({ r: rowIdx, c: colIdx });
+                      setSelectEnd({ r: rowIdx, c: colIdx });
+                      setFocused({ r: rowIdx, c: colIdx });
+                    }
                   },
                   onPointerEnter: () => {
                     if (pointerIsDownRef.current) {
@@ -448,12 +454,18 @@ export default function DataGrid() {
                       extendSelection(rowIdx, colIdx);
                     }
                   },
-                  onPointerUp: () => {
+                  onPointerUp: (ev?: React.PointerEvent<HTMLTableCellElement>) => {
                     if (!pointerMovedRef.current) {
                       if (editing && (editing.r !== rowIdx || editing.c !== colIdx)) {
                         commitEdit();
                       }
-                      if (data[rowIdx][colIdx]) {
+                      // Prevent edit mode on shift-click (selection extension)
+                      if (ev && ev.shiftKey && focused) {
+                        // Only update selection, do not enter edit mode or change focus
+                        setSelectStart(focused);
+                        setSelectEnd({ r: rowIdx, c: colIdx });
+                        setEditing(null);
+                      } else if (data[rowIdx][colIdx]) {
                         setSelectStart({ r: rowIdx, c: colIdx });
                         setSelectEnd({ r: rowIdx, c: colIdx });
                         setFocused({ r: rowIdx, c: colIdx });
