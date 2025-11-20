@@ -1,5 +1,4 @@
-// DataGridService.ts
-// Utility functions for DataGrid logic
+
 
 export type Coord = { r: number; c: number };
 

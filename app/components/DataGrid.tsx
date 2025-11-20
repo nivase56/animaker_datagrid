@@ -31,14 +31,14 @@ export default function DataGrid() {
   const [colHeaders, setColHeaders] = useState<string[]>(() =>
     Array.from({ length: 5 }, (_, i) => `Head ${i + 1}`)
   );
-  // load persisted grid if available
+  // load persisted grid
   useEffect(() => {
     try {
       const raw = localStorage.getItem("animaker-datagrid:v1");
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (parsed?.data && Array.isArray(parsed.data)) {
-        // defer state updates slightly to avoid sync setState-in-effect warnings
+  // avoid sync setState warning
         setTimeout(() => {
           setData(parsed.data);
           setRows(parsed.rows ?? parsed.data.length ?? 5);
@@ -60,17 +60,17 @@ export default function DataGrid() {
         }, 0);
       }
     } catch {
-      // ignore
+
     }
   }, []);
 
-  // persist on changes
+  // persist changes
   useEffect(() => {
     try {
       const payload = { rows, cols, data, rowLabels, colHeaders };
       localStorage.setItem("animaker-datagrid:v1", JSON.stringify(payload));
     } catch {
-      // ignore
+
     }
   }, [rows, cols, data, rowLabels, colHeaders]);
   const pointerIsDownRef = useRef(false);
@@ -100,10 +100,10 @@ export default function DataGrid() {
     return () => window.removeEventListener("pointerup", onPointerUp);
   }, []);
 
-  // keyboard handlers: copy/cut, navigation, Enter/Tab to edit
+  // keyboard handlers
   useEffect(() => {
     function writeSelectionToClipboard(cut = false) {
-      // prefer the live editing cell when present
+
       const sel = editing
         ? { r1: editing.r, r2: editing.r, c1: editing.c, c2: editing.c }
         : selectStart && selectEnd
@@ -144,14 +144,14 @@ export default function DataGrid() {
 
     function onKey(e: KeyboardEvent) {
       const meta = e.ctrlKey || e.metaKey;
-      // copy/cut - intercept always; when editing, copy the whole cell (editingValue)
+
       if (meta && (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "x")) {
         e.preventDefault();
         writeSelectionToClipboard(e.key.toLowerCase() === "x");
         return;
       }
 
-      // navigation when not editing
+
       if (!editing) {
         if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
           e.preventDefault();
@@ -200,16 +200,16 @@ export default function DataGrid() {
     return () => window.removeEventListener("keydown", onKey);
   }, [data, selectStart, selectEnd, focused, editing, editingValue, rows, cols]);
 
-  // auto-resize the editing input to fit its content (up to the cell width)
+  // auto-resize editing input
   useEffect(() => {
     function adjust() {
       const inp = inputRef.current;
       const meas = measureRef.current;
       if (!inp || !meas || !editing) return;
-      // set measurement text
+
       meas.textContent = editingValue ?? "";
-      // desired width in px
-      const desired = meas.scrollWidth + 12; // small padding
+
+  const desired = meas.scrollWidth + 12;
       const td = containerRef.current?.querySelector(
         `td[data-row='${editing.r}'][data-col='${editing.c}']`
       ) as HTMLElement | null;
@@ -223,7 +223,7 @@ export default function DataGrid() {
     return () => window.removeEventListener("resize", adjust);
   }, [editingValue, editing, rows, cols]);
 
-  // (keyboard handlers are added later)
+
 
   function startSelection(r: number, c: number) {
     setSelectStart({ r, c });
@@ -263,7 +263,7 @@ export default function DataGrid() {
 
   function addCol() {
     setData((prev) => {
-      return prev.map((row) => [...row, ""]); // add new empty cell
+  return prev.map((row) => [...row, ""]);
     });
 
     setColHeaders((prev) => [...prev, `Head ${prev.length + 1}`]);
@@ -288,13 +288,13 @@ export default function DataGrid() {
   }
 
   function handlePaste(e: React.ClipboardEvent) {
-    // if a cell input is in edit mode, allow the browser to paste into it instead
+
     if (editing) return;
     const text = e.clipboardData.getData("text/plain");
     if (!text) return;
     e.preventDefault();
 
-    // If a single cell is selected and the paste is plain text (not TSV), enter edit mode and paste into that cell
+
     const singleCell =
       selectStart &&
       selectEnd &&
@@ -302,7 +302,7 @@ export default function DataGrid() {
       selectStart.c === selectEnd.c;
     const isTSV = text.includes("\t") || text.includes("\n");
 
-    // If single cell selected and clipboard is a TSV block (multi-cell), paste as grid
+
     if (singleCell && isTSV) {
       const rowsText = text.split(/\r?\n/).filter((r) => r.length > 0);
       const parsed = rowsText.map((r) => r.split("\t"));
@@ -344,7 +344,7 @@ export default function DataGrid() {
       return;
     }
 
-    // If single cell selected and clipboard is plain text, enter edit mode and paste into that cell
+
     if (singleCell && !isTSV) {
       setEditing(selectStart);
       setEditingValue(text);
@@ -353,7 +353,7 @@ export default function DataGrid() {
       return;
     }
 
-    // Otherwise, treat as TSV paste (multi-cell selection)
+
     const rowsText = text.split(/\r?\n/).filter((r) => r.length > 0);
     const parsed = rowsText.map((r) => r.split("\t"));
 
@@ -436,7 +436,7 @@ export default function DataGrid() {
                     pointerMovedRef.current = false;
                     pointerDownCellRef.current = { r: rowIdx, c: colIdx };
                     if (ev.shiftKey && focused) {
-                      // Shift-click: extend selection from focused to clicked cell
+
                       setSelectStart(focused);
                       setSelectEnd({ r: rowIdx, c: colIdx });
                     } else {
